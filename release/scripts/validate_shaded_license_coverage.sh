@@ -78,35 +78,6 @@ should_skip_module() {
   return 1
 }
 
-# Modules whose shade <includes> are known not to match their runtime dependency
-# tree. Only the includes-vs-tree comparison is downgraded to a warning for these,
-# and only for the modules named here; every other check, for every module, stays
-# blocking.
-#
-# xtable-hive-metastore's include list was written for a Hive 2.x dependency set:
-# 25 entries name dependencies that are no longer resolved and 97 runtime
-# dependencies are missing from it. Reconciling the two changes what the shaded
-# jar bundles, so it is a release decision rather than a tooling fix and is
-# tracked in #880. This entry only became reachable when the ripgrep fail-open
-# below was fixed, so the drift has been present and unreported for some time
-# rather than being newly introduced.
-#
-# Remove the entry when #880 lands; the check is then blocking again.
-KNOWN_INCLUDES_DRIFT=(
-  "xtable-hive-metastore"
-)
-
-has_known_includes_drift() {
-  local module="$1"
-  local drifted_module
-  for drifted_module in "${KNOWN_INCLUDES_DRIFT[@]}"; do
-    if [[ "${module}" == "${drifted_module}" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 SHADE_MODULES=()
 while IFS= read -r module; do
   module_dir="$(dirname "${module}")"
@@ -198,15 +169,9 @@ for module in "${SHADE_MODULES[@]}"; do
   printf '%s\n' "${runtime_includes[@]}" | sort -u > "${runtime_set_file}"
 
   if ! diff -u "${runtime_set_file}" "${include_set_file}" > "${diff_output_file}"; then
-    if has_known_includes_drift "${module}"; then
-      echo "WARN ${module}: shade <includes> do not match runtime dependencies from ${tree_file}."
-      echo "     Known pre-existing drift, tracked in #880; not failing the build."
-      sed 's/^/  /' "${diff_output_file}"
-    else
-      echo "FAIL ${module}: shade <includes> must exactly match runtime dependencies from ${tree_file}."
-      sed 's/^/  /' "${diff_output_file}"
-      overall_status=1
-    fi
+    echo "FAIL ${module}: shade <includes> must exactly match runtime dependencies from ${tree_file}."
+    sed 's/^/  /' "${diff_output_file}"
+    overall_status=1
   fi
 
   rm -f "${include_set_file}" "${runtime_set_file}" "${diff_output_file}"
